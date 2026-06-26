@@ -14,9 +14,46 @@ output:
        bootswatch: litera
 ---
 
+<style>
+body, 
+.main-container, 
+.container-fluid,
+div.main-container.container-fluid {
+   background-color: #f2f2f2 
+}
+h1 {
+   color: #1F4E79 !important;
+   font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+   font-weight: 700;
+   border-bottom: 2px solid #1F4E79;
+   padding-bottom: 8px;
+   margin-top: 40px !important;
+}
+h2 {
+   color: #2E6B9E !important;
+   font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+   font-weight: 600;
+   margin-top: 30px !important;
+}
+h3 {
+   color: #555555 !important;
+   font-style: italic;
+   font-weight: 500;
+}
+</style>
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE, include = TRUE)
+```
 
+<!--Cargar las librerías necesarias para la limpieza,-->
+
+<!--transformación y visualización de datos-->
+
+<!--Instalar paquetes: geoAr, bslib, showtext
+r-->
+
+```{r, include=FALSE}
 library(tidyverse)
 library(readr)
 library(lubridate)
@@ -28,3 +65,329 @@ library(geoAr)
 library(plotly)
 library(knitr)
 library(kableExtra)
+```
+
+# 1. Introducción
+
+## 1.1 Contexto
+
+La tasa de natalidad representa uno de los ejes centrales para comprender la demografía de una región, ya que determina directamente el ritmo de crecimiento poblacional y renovación generacional. Diversos estudios sugieren que fluctuaciones en variables críticas como el empleo y los niveles de vulnerabilidad social alteran las perspectivas de futuro y las pautas reproductivas
+	
+Este trabajo propone examinar dichas dinámicas en el contexto de la Provincia de Buenos Aires. Para eso se utilizaron datos públicos provenientes de diferentes organismos oficiales, incluyendo registros de nacimientos, proyecciones de población, indicadores de pobreza e indicadores de desempleo.
+
+
+## 1.2 Justificación
+
+El interés por abordar esta problemática radica en la necesidad de evaluar cómo los ciclos económicos recientes han impactado en la estructura demográfica bonaerense. En un escenario caracterizado por la inestabilidad macroeconómica, analizar de forma integrada las variables sociales y los registros de nacimientos permite identificar la tendencia decreciente de la natalidad.
+
+## 1.3 Objetivos
+
+Para guiar la investigación, se establecieron los siguientes objetivos
+
+- Analizar la evolución de la tasa de natalidad entre 2016 y 2025.
+- Explorar la posible relación entre pobreza y natalidad.
+- Explorar la posible relación entre desempleo y natalidad.
+- Aplicar técnicas de limpieza, transformación y análisis exploratorio de datos.
+
+# 2. Descripción de los datos
+
+Se utilizaron cuatro conjuntos de datos provenientes de portales de datos abiertos de organismos públicos argentinos:
+
+- Nacimientos anuales (1996-2019)): Registros históricos consolidando los nacimientos por municipio.
+- Nacimientos mensuales (2020-2026)): Datos desagregados que permiten capturar la tendencia más reciente.
+- Proyecciones de población: Estimaciones censales utilizadas como denominador para el cálculo de tasas.
+- Indicadores de pobreza: Relevamientos oficiales sobre las condiciones de vida de la población.
+- Indicadores de desempleo: Series de tiempo correspondientes a las tasas de desocupación.
+
+<!--Importar los datasets utilizados en el trabajo-->
+
+```{r}
+nac1 <- read_delim(
+  "data/raw/nacimientos-anual-1996_2019.csv",
+  delim = ","
+)
+
+nac2 <- read_excel(
+  "data/raw/nacimientos_mensuales_012020-042026 (2).xlsx"
+)
+
+pobreza <- read_excel(
+  "data/raw/incidencia-de-la-pobreza-y-la-indigencia.xlsx"
+)
+
+poblacion <- read_csv(
+  "data/raw/proyecciones-poblacion-2010_2025.csv"
+)
+
+desempleo <- read_delim(
+  "data/raw/tasa-desempleo-valores-anuales.csv",
+  delim = ";"
+)
+```
+# 3. Limpieza de datos
+
+## 3.1 Transformaciones de datasets
+
+Por la diversidad de formatos y orígenes de las fuentes se diseñó un proceso de preprocesamiento estructurado en los siguientes puntos:
+
+- Estandarización de identificadores municipales para la correcta vinculación entre bases
+- Conversión de variables al formato numérico.
+- Reestructuración de datos de población desde formato ancho a formato largo.
+- Consolidación de registros de nacimientos provenientes de diferentes fuentes.
+- Cálculo de la tasa de natalidad por cada 1.000 habitantes.
+- Modificación de base de datos espaciales por compatibilidad con datasets propios.
+
+<!--Seleccionar únicamente las variables necesarias-->
+
+<!--del dataset de población-->
+
+```{r}
+ poblacion <- poblacion %>%
+  filter(
+    !is.na(municipio_id),
+    municipio_id != "",
+    municipio_id != "06"
+  ) %>%
+  #Modificación de variables en casos de error
+  mutate(
+    municipio_id = case_when(
+      str_detect(municipio_nombre, "(?i)chas") ~ "06217",
+      str_detect(municipio_nombre, "(?i)leza") ~ "06218",
+      TRUE ~ str_pad(as.character(as.numeric(municipio_id)), 5, "left", "0")
+    )
+  )
+  
+```
+
+<!--Consolidar nacimientos anuales entre 1996 y 2019-->
+
+```{r}
+nac1_limpio <- nac1 %>%
+  mutate(
+    municipio_id = case_when(
+      str_detect(municipio_nombre, "(?i)chas") ~ "06217",
+      str_detect(municipio_nombre, "(?i)leza") ~ "06218",
+      TRUE ~ str_pad(as.character(as.numeric(municipio_id)), 5, "left", "0")
+    )
+  ) %>%
+  group_by(anio, municipio_id, municipio_nombre) %>%
+  summarise(nacimientos = sum(cantidad, na.rm = TRUE), .groups = "drop")
+
+nac2_limpio <- nac2 %>%
+  mutate(
+    municipio_id = case_when(
+      str_detect(municipio_nombre, "(?i)chas") ~ "06217",
+      str_detect(municipio_nombre, "(?i)leza") ~ "06218",
+      TRUE ~ str_pad(as.character(as.numeric(municipio_id)), 5, "left", "0")
+    )
+  ) %>%
+  group_by(anio, municipio_id, municipio_nombre) %>%
+  summarise(nacimientos = sum(total, na.rm = TRUE), .groups = "drop")
+```
+
+<!--Unir ambos períodos en un único dataset-->
+
+```{r}
+nacimientos <- bind_rows(
+  nac1_limpio,
+  nac2_limpio
+)
+nacimientos <- nacimientos %>%
+  group_by(anio, municipio_id, municipio_nombre) %>%
+  summarise(nacimientos = sum(nacimientos), .groups = "drop")
+```
+
+<!--Transformar la población desde formato ancho-->
+
+<!--(una columna por año) a formato largo-->
+
+<!--(una fila por municipio y año)-->
+
+```{r}
+
+poblacion <- poblacion %>%
+  mutate(
+    across(`2010`:`2025`,
+           ~as.numeric(as.character(.)))
+  )
+
+poblacion_larga <- poblacion %>%
+  pivot_longer(
+    cols = `2010`:`2025`,
+    names_to = "anio",
+    values_to = "poblacion"
+  ) %>%
+  mutate(
+    anio = as.numeric(anio)
+  )
+```
+
+<!--Unir nacimientos con población-->
+
+```{r}
+datos_natalidad <- nacimientos %>%
+  left_join(
+    poblacion_larga,
+    by = c("municipio_id", "anio")
+  )
+```
+
+<!--Calculo de tasa de natalidad-->
+
+```{r}
+datos_natalidad <- datos_natalidad %>%
+  mutate(
+    tasa_natalidad = nacimientos / poblacion * 1000
+  ) %>%
+
+ filter(
+ !is.na(tasa_natalidad),
+ tasa_natalidad <= 50
+)
+
+```
+
+<!--Filtro 2016 - 2025-->
+
+```{r}
+datos_natalidad <- datos_natalidad %>%
+  filter(
+    anio >= 2016,
+    anio <= 2025
+  )
+```
+
+<!--Datos por municipio promediando el año-->
+
+```{r}
+natalidad_munic <- datos_natalidad %>%
+  group_by(municipio_id) %>%
+  summarise(
+    tasa_natalidad = mean(tasa_natalidad, na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+<!--Filtro de mapa para graf. coropletico-->
+
+```{r}
+partidos_geo <- get_geo(geo = "BUENOS AIRES")
+
+partidos_geom <- partidos_geo %>%
+  unite(col = "municipio_id", codprov_censo, coddepto_censo, sep = "", remove = TRUE) %>%
+  mutate(
+    municipio_id = str_pad(as.character(as.numeric(municipio_id)), 5, "left", "0")
+  )
+```
+
+<!--Unión de datasets de mapa + natalidad por municipio por municipio_id-->
+
+```{r}
+mapa_coro <- partidos_geom %>%
+  left_join(natalidad_munic, by = "municipio_id")
+```
+
+<!--Limpieza de pobreza-->
+
+```{r}
+pobreza_limpia <- pobreza %>%
+  rename(
+    anio = Año,
+    semestre = Semestre,
+    componente = Componentes,
+    condicion = Condición,
+    valor = Valor
+  ) %>%
+  mutate(
+    anio = year(anio)
+  ) %>%
+  filter(
+    componente == "Personas",
+    condicion == "Pobreza"
+  ) %>%
+  group_by(anio) %>%
+  summarise(
+    pobreza = mean(valor, na.rm = TRUE),
+    .groups = "drop"
+  )
+```
+
+<!--Limpieza de desempleo-->
+
+```{r}
+desempleo_limpio <- desempleo %>%
+  mutate(
+    indice_tiempo = dmy(indice_tiempo),
+    anio = year(indice_tiempo)
+  ) %>%
+  transmute(
+    anio,
+    desempleo = eph_continua_tasa_desempleo_total * 100
+  ) %>%
+  filter(anio >= 2016)
+```
+
+<!--Natalidad anual promedio-->
+
+```{r}
+natalidad_anual <- datos_natalidad %>%
+  group_by(anio) %>%
+  summarise(
+    tasa_natalidad = mean(tasa_natalidad, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+natalidad_anual <- natalidad_anual %>%
+  mutate(
+    anio = as.numeric(anio)
+  )
+```
+
+<!--Dataset final-->
+
+```{r}
+datos_final <- natalidad_anual %>%
+  left_join(pobreza_limpia, by = "anio") %>%
+  left_join(desempleo_limpio, by = "anio")
+```
+
+## 3.2 Tratamiento de valores atípicos
+
+Durante la etapa de inspección inicial se identificaron outliers en los registros, concentrados principalmente en la natalidad del año 2018. Al contrastar los nacimientos directamente se encontraron valores significativamente más bajos que en el año anterior o posterior.
+
+Al cotejar los nacimientos contra la aplicación del RENAPER de Nacimientos en Argentina por departamento, se observó también una diferencia significativa de nacimientos. Esto determina que ocurrió una falla de carga en el dataset original de nacimientos. Para resguardar la validez del análisis estadístico se definió excluir el 2018 de la base de datos.
+
+```{r}
+# 1. Construimos el dataset que mantiene los valores atípicos
+datos_con_outliers <- nacimientos %>%
+  left_join(poblacion_larga, by = c("municipio_id", "anio")) %>%
+  mutate(tasa_natalidad = nacimientos / poblacion * 1000) %>%
+  filter(!is.na(tasa_natalidad), anio >= 2016, anio <= 2025)
+
+# 2. Armamos el gráfico de dispersión para evidenciar el error del 2018
+g_outliers <- ggplot(
+  datos_con_outliers,
+  aes(x = as.factor(anio), y = tasa_natalidad)
+) +
+  geom_jitter(
+    color = "#C0392B", 
+    alpha = 0.6, 
+    size = 2, 
+    width = 0.2
+  ) +
+  labs(
+    title = "Distorsión por Errores de Carga (Sin Filtrar)",
+    subtitle = "Tasas de natalidad municipales por año con outliers",
+    x = "Año",
+    y = "Tasa de natalidad (por cada 1.000 hab.)"
+  ) +
+  theme_minimal() +
+  theme(
+    panel.border = element_rect(color = "white", fill = NA, linewidth = 1.5),
+    plot.title = element_text(family = "Courier New", size = 16, face = "bold", hjust = 0.5)
+  )
+
+# 3. Lo hacemos interactivo con plotly
+ggplotly(g_outliers)
+```
+
